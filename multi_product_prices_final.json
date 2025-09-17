@@ -1,0 +1,145 @@
+{
+  "products": [
+    {
+      "product": "The Witcher 3 Complete Edition",
+      "productDetail": [
+        {
+          "url": "https://www.gamivo.com/product/the-witcher-3-wild-hunt-pc-gog-global-en-de-fr-it-pl-cs-ja-ko-pt-ru-zh-es-tr-zh-hu-ar-complete",
+          "offer": [
+            {
+              "lowestPrice_2025-09-17T16:45": 9.62,
+              "promotedPrice_2025-09-17T16:45": 12.02
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 9.86,
+              "promotedPrice_2025-09-17T16:45": 12.32
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 10.27,
+              "promotedPrice_2025-09-17T16:45": 12.84
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 8.74,
+              "promotedPrice_2025-09-17T16:45": 10.93
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 8.96,
+              "promotedPrice_2025-09-17T16:45": 11.2
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 9.34,
+              "promotedPrice_2025-09-17T16:45": 11.67
+            }
+          ]
+        },
+        {
+          "url": "https://www.eneba.com/gog-the-witcher-3-wild-hunt-complete-edition-pc-gog-key-global",
+          "offer": [
+            {
+              "lowestPrice_2025-09-17T16:45": 1136.37
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 1142.62
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 1143.66
+            }
+          ]
+        },
+        {
+          "url": "https://driffle.com/the-witcher-3-wild-hunt-complete-edition-global-pc-gog-digital-key-p9930671",
+          "offer": [
+            {
+              "lowestPrice_2025-09-17T16:45": 983.89
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 984.94
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 1037.11
+            },
+            {
+              "lowestPrice_2025-09-17T16:45": 1039.19
+            }
+          ]
+        },
+        {
+          "url": "https://www.g2a.com/the-witcher-3-wild-hunt-complete-edition-pc-gogcom-key-global-i10000000663040?suid=65bdb718-698f-475e-989c-4ece52c53505",
+          "offer": []
+        }
+      ]
+    },
+    {
+      "product": "The Elder Scrolls V: Skyrim Special Edition",
+      "productDetail": [
+        {
+          "url": "https://www.gamivo.com/product/the-elder-scrolls-v-skyrim-special-edition",
+          "offer": [
+            {
+              "lowestPrice_2025-09-17T16:47": 6.9,
+              "promotedPrice_2025-09-17T16:47": 9.2
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 9.48,
+              "promotedPrice_2025-09-17T16:47": 11.85
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 9.48,
+              "promotedPrice_2025-09-17T16:47": 11.85
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 6.34,
+              "promotedPrice_2025-09-17T16:47": 8.45
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 6.34,
+              "promotedPrice_2025-09-17T16:47": 8.46
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 6.46,
+              "promotedPrice_2025-09-17T16:47": 8.61
+            }
+          ]
+        },
+        {
+          "url": "https://www.eneba.com/steam-the-elder-scrolls-v-skyrim-special-edition-steam-key-global",
+          "offer": [
+            {
+              "lowestPrice_2025-09-17T16:47": 864.52,
+              "promotedPrice_2025-09-17T16:47": 1799.0
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 865.56,
+              "promotedPrice_2025-09-17T16:47": 1799.0
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 874.93,
+              "promotedPrice_2025-09-17T16:47": 1799.0
+            }
+          ]
+        },
+        {
+          "url": "https://driffle.com/the-elder-scrolls-v-skyrim-steam-cd-key-p746048",
+          "offer": [
+            {
+              "lowestPrice_2025-09-17T16:47": 511.25
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 559.24
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 562.37
+            },
+            {
+              "lowestPrice_2025-09-17T16:47": 573.85
+            }
+          ]
+        },
+        {
+          "url": "https://www.g2a.com/the-elder-scrolls-v-skyrim-special-edition-steam-key-global-i10000029090004",
+          "offer": []
+        }
+      ]
+    }
+  ]
+}
