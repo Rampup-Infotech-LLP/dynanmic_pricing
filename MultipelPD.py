@@ -1302,6 +1302,586 @@
 #     asyncio.run(main())
 
 
+# import asyncio
+# import json
+# import random
+# import re
+# import time
+# from datetime import datetime
+# from typing import List, Dict, Optional
+# from pathlib import Path
+# import aiohttp
+# from bs4 import BeautifulSoup
+# from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+
+# class PlaywrightProductScraper:
+#     def __init__(self, batch_size: int = 30, concurrent_browsers: int = 3):
+#         self.batch_size = batch_size
+#         self.concurrent_browsers = concurrent_browsers
+#         self.progress_file = "playwright_progress.json"
+#         self.output_file = "playwright_results.json"
+#         self.cache_file = "price_cache.json"
+
+#         # Progress tracking
+#         self.completed_products = set()
+#         self.results = {"products": [], "timestamp": datetime.now().isoformat()}
+#         self.cache = {}
+
+#         # User agents for rotation
+#         self.user_agents = [
+#             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+#             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+#             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+#             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"
+#         ]
+
+#         # Site configurations (G2A removed)
+#         self.site_configs = {
+#             "gamivo": {
+#                 "selectors": {
+#                     "primary": 'li[data-testid="app-product-offer-item"]',
+#                     "price": '.price__value, [class*="price"]',
+#                     "fallback": 'li:has([class*="price"])'
+#                 },
+#                 "wait_for": 'li[data-testid="app-product-offer-item"], .price__value',
+#                 "currency": "$",
+#                 "price_range": (0.5, 500.0)
+#             },
+#             "eneba": {
+#                 "selectors": {
+#                     "primary": 'ul._7z2Gr li.ej1a7C',
+#                     "container": 'ul._7z2Gr',
+#                     "price": '.L5ErLT, [class*="price"]',
+#                     "fallback": 'li:has(.L5ErLT)'
+#                 },
+#                 "wait_for": 'ul._7z2Gr, .L5ErLT',
+#                 "currency": "₹",
+#                 "price_range": (100.0, 10000.0)
+#             },
+#             "driffle": {
+#                 "selectors": {
+#                     "primary": 'div#product-other-offers div[class*="sc-"]',
+#                     "container": 'div#product-other-offers',
+#                     "price": '[class*="sc-2fc8b9b4-25"], [class*="price"]',
+#                     "fallback": 'div:has([class*="price"])'
+#                 },
+#                 "wait_for": 'div#product-other-offers, [class*="sc-"]',
+#                 "currency": "₹", 
+#                 "price_range": (100.0, 10000.0)
+#             }
+#         }
+
+#     async def setup_browser_context(self, browser: Browser, user_agent: str) -> BrowserContext:
+#         """Create optimized browser context with stealth features"""
+#         context = await browser.new_context(
+#             user_agent=user_agent,
+#             viewport={'width': 1920, 'height': 1080},
+#             java_script_enabled=True,
+#             ignore_https_errors=True,
+#             extra_http_headers={
+#                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+#                 'Accept-Language': 'en-US,en;q=0.5',
+#                 'Accept-Encoding': 'gzip, deflate, br',
+#                 'DNT': '1',
+#                 'Connection': 'keep-alive',
+#                 'Upgrade-Insecure-Requests': '1',
+#             }
+#         )
+
+#         # Add stealth modifications
+#         await context.add_init_script("""
+#             // Remove webdriver property
+#             Object.defineProperty(navigator, 'webdriver', {
+#                 get: () => undefined,
+#             });
+
+#             // Mock plugins
+#             Object.defineProperty(navigator, 'plugins', {
+#                 get: () => [1, 2, 3, 4, 5],
+#             });
+
+#             // Mock languages
+#             Object.defineProperty(navigator, 'languages', {
+#                 get: () => ['en-US', 'en'],
+#             });
+
+#             // Override permissions
+#             const originalQuery = window.navigator.permissions.query;
+#             return window.navigator.permissions.query = (parameters) => (
+#                 parameters.name === 'notifications' ?
+#                     Promise.resolve({ state: Notification.permission }) :
+#                     originalQuery(parameters)
+#             );
+#         """)
+
+#         return context
+
+#     async def load_progress(self):
+#         """Load previous progress and cache"""
+#         try:
+#             if Path(self.progress_file).exists():
+#                 with open(self.progress_file, "r") as f:
+#                     data = json.load(f)
+#                     self.completed_products = set(data.get("completed", []))
+#                     self.results = data.get("results", {"products": []})
+#                     print(f"📂 Resumed: {len(self.completed_products)} products completed")
+
+#             if Path(self.cache_file).exists():
+#                 with open(self.cache_file, "r") as f:
+#                     self.cache = json.load(f)
+#                     print(f"💾 Loaded cache: {len(self.cache)} entries")
+
+#         except Exception as e:
+#             print(f"❌ Error loading progress: {e}")
+
+#     async def save_progress(self):
+#         """Save current progress and cache"""
+#         progress_data = {
+#             "completed": list(self.completed_products),
+#             "results": self.results,
+#             "timestamp": datetime.now().isoformat(),
+#             "total_completed": len(self.completed_products)
+#         }
+
+#         try:
+#             with open(self.progress_file, "w") as f:
+#                 json.dump(progress_data, f, indent=2)
+
+#             with open(self.output_file, "w") as f:
+#                 json.dump(self.results, f, indent=2)
+
+#             with open(self.cache_file, "w") as f:
+#                 json.dump(self.cache, f, indent=2)
+
+#         except Exception as e:
+#             print(f"❌ Error saving progress: {e}")
+
+#     def get_site_name(self, url: str) -> str:
+#         """Extract site name from URL"""
+#         domain = url.split('/')[2].lower()
+#         for site in self.site_configs.keys():
+#             if site in domain:
+#                 return site
+#         return "unknown"
+
+#     async def intelligent_wait(self, page: Page, site_name: str, max_retries: int = 3):
+#         """Smart waiting strategy based on site behavior"""
+#         config = self.site_configs.get(site_name, {})
+#         wait_selector = config.get("wait_for", "body")
+
+#         for attempt in range(max_retries):
+#             try:
+#                 # Wait for initial content
+#                 await page.wait_for_selector(wait_selector, timeout=15000)
+
+#                 # Site-specific waiting strategies
+#                 if site_name == "gamivo":
+#                     # Scroll to trigger lazy loading
+#                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight/2)")
+#                     await asyncio.sleep(2)
+#                     await page.evaluate("window.scrollTo(0, 0)")
+#                     await asyncio.sleep(1)
+#                     # Extra wait for dynamic content
+#                     await asyncio.sleep(3)
+
+#                 elif site_name == "driffle":
+#                     # Wait for offers section specifically
+#                     await page.wait_for_selector('div#product-other-offers', timeout=10000)
+#                     await asyncio.sleep(2)
+
+#                 else:
+#                     await asyncio.sleep(1)
+
+#                 return True
+
+#             except Exception as e:
+#                 if attempt < max_retries - 1:
+#                     print(f"    ⏳ Wait retry {attempt + 1}/{max_retries}")
+#                     await asyncio.sleep(2)
+#                     continue
+#                 else:
+#                     print(f"    ⚠️ Wait timeout for {site_name}")
+#                     return False
+
+#     def extract_prices_from_text(self, text: str, currency: str, price_range: tuple) -> List[float]:
+#         """Extract valid prices from text"""
+#         prices = []
+
+#         # Currency-specific patterns
+#         if currency == "₹":
+#             patterns = [r'₹\s*(\d+(?:,\d+)*(?:\.\d+)?)', r'Rs\.?\s*(\d+(?:,\d+)*(?:\.\d+)?)']
+#         else:
+#             patterns = [r'[\$€£]\s*(\d+(?:\.\d+)?)', r'(\d+\.\d+)']
+
+#         for pattern in patterns:
+#             matches = re.findall(pattern, text)
+#             for match in matches:
+#                 try:
+#                     clean_price = match.replace(',', '')
+#                     price_value = float(clean_price)
+#                     if price_range[0] <= price_value <= price_range[1]:
+#                         prices.append(price_value)
+#                 except ValueError:
+#                     continue
+
+#         return list(set(prices))  # Remove duplicates
+
+#     async def scrape_site_offers(self, page: Page, site_name: str, current_time: str) -> List[Dict]:
+#         """Enhanced site-specific offer extraction"""
+#         offers = []
+#         config = self.site_configs.get(site_name, {})
+
+#         try:
+#             content = await page.content()
+#             soup = BeautifulSoup(content, 'html.parser')
+
+#             # Get site configuration
+#             selectors = config.get("selectors", {})
+#             currency = config.get("currency", "$")
+#             price_range = config.get("price_range", (1.0, 500.0))
+
+#             print(f"    🔍 Extracting {site_name.upper()} offers...")
+
+#             # Try primary selector
+#             offer_elements = soup.select(selectors.get("primary", ""))
+
+#             # Try fallback selectors if primary fails
+#             if not offer_elements and "container" in selectors:
+#                 container = soup.select_one(selectors["container"])
+#                 if container:
+#                     offer_elements = container.find_all("li") or container.find_all("div")
+
+#             if not offer_elements and "fallback" in selectors:
+#                 offer_elements = soup.select(selectors["fallback"])
+
+#             print(f"    📊 Found {len(offer_elements)} potential offers")
+
+#             # Extract prices from offers
+#             for i, element in enumerate(offer_elements[:15]):
+#                 try:
+#                     element_text = element.get_text()
+
+#                     # Look for price elements first
+#                     price_elements = element.select(selectors.get("price", ""))
+#                     element_prices = []
+
+#                     if price_elements:
+#                         for price_elem in price_elements:
+#                             prices = self.extract_prices_from_text(
+#                                 price_elem.get_text(), currency, price_range
+#                             )
+#                             element_prices.extend(prices)
+
+#                     # If no price elements, extract from full text
+#                     if not element_prices:
+#                         element_prices = self.extract_prices_from_text(
+#                             element_text, currency, price_range
+#                         )
+
+#                     # Create offer data
+#                     if element_prices:
+#                         unique_prices = sorted(list(set(element_prices)))
+#                         offer_data = {}
+
+#                         if len(unique_prices) >= 2:
+#                             offer_data[f"lowestPrice_{current_time}"] = unique_prices[0]
+#                             offer_data[f"promotedPrice_{current_time}"] = unique_prices[1]
+#                         elif len(unique_prices) == 1:
+#                             offer_data[f"lowestPrice_{current_time}"] = unique_prices[0]
+
+#                         if offer_data:
+#                             offers.append(offer_data)
+#                             print(f"      💰 Offer {i+1}: {currency}{unique_prices[0]}")
+
+#                 except Exception as e:
+#                     print(f"      ❌ Error processing offer {i+1}: {e}")
+#                     continue
+
+#         except Exception as e:
+#             print(f"    ❌ Error scraping {site_name}: {e}")
+
+#         print(f"    ✅ {site_name.upper()}: {len(offers)} valid offers extracted")
+#         return offers
+
+#     async def scrape_product_on_site(self, context: BrowserContext, product: Dict, site_link: Dict, current_time: str) -> Dict:
+#         """Scrape single product on single site (G2A handling removed)"""
+#         site_name = self.get_site_name(site_link["url"])
+
+#         site_data = {
+#             "url": site_link["url"],
+#             "site": site_name,
+#             "offer": []
+#         }
+
+#         page = None
+#         try:
+#             page = await context.new_page()
+
+#             # Block resources for faster loading
+#             await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2}", 
+#                            lambda route: route.abort())
+
+#             print(f"    🌐 {site_name.upper()}: Loading page...")
+
+#             # Navigate with timeout
+#             await page.goto(site_link["url"], timeout=30000, wait_until="domcontentloaded")
+
+#             # Intelligent waiting
+#             await self.intelligent_wait(page, site_name)
+
+#             # Extract offers
+#             offers = await self.scrape_site_offers(page, site_name, current_time)
+#             site_data["offer"] = offers
+
+#             # Add delay to avoid rate limiting
+#             await asyncio.sleep(random.uniform(1, 3))
+
+#         except Exception as e:
+#             print(f"    ❌ Error scraping {site_name}: {e}")
+#             site_data["offer"] = []
+
+#         finally:
+#             if page:
+#                 await page.close()
+
+#         return site_data
+
+#     async def scrape_product(self, contexts: List[BrowserContext], product: Dict) -> Optional[Dict]:
+#         """Scrape single product across all sites"""
+#         if product["product"] in self.completed_products:
+#             return None
+
+#         print(f"\n🎮 Scraping: {product['product']}")
+#         current_time = datetime.now().strftime('%Y-%m-%dT%H:%M')
+
+#         product_result = {
+#             "product": product["product"],
+#             "productDetail": []
+#         }
+
+#         # Filter out any G2A links if they exist
+#         valid_links = [link for link in product["links"] if self.get_site_name(link["url"]) != "g2a"]
+
+#         # Create tasks for parallel site scraping
+#         tasks = []
+#         for i, site_link in enumerate(valid_links):
+#             context = contexts[i % len(contexts)]
+#             task = self.scrape_product_on_site(context, product, site_link, current_time)
+#             tasks.append(task)
+
+#         # Execute all sites in parallel
+#         site_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+#         # Process results
+#         for result in site_results:
+#             if isinstance(result, Exception):
+#                 print(f"    ❌ Task failed: {result}")
+#             else:
+#                 product_result["productDetail"].append(result)
+
+#         # Update tracking
+#         self.results["products"].append(product_result)
+#         self.completed_products.add(product["product"])
+
+#         total_offers = sum(len(site["offer"]) for site in product_result["productDetail"])
+#         print(f"  🎯 Total offers: {total_offers}")
+
+#         return product_result
+
+#     async def context_recycling_cleanup(self, contexts: List[BrowserContext], browser: Browser):
+#         """Recycle browser contexts periodically to prevent memory leaks"""
+#         try:
+#             for i, context in enumerate(contexts):
+#                 await context.close()
+#                 user_agent = random.choice(self.user_agents)
+#                 contexts[i] = await self.setup_browser_context(browser, user_agent)
+#             print("🔄 Browser contexts recycled successfully")
+#         except Exception as e:
+#             print(f"❌ Error recycling contexts: {e}")
+
+#     async def scrape_multiple_products(self, products: List[Dict]) -> Dict:
+#         """Main scraping function with parallel processing and context recycling"""
+#         print(f"🚀 PLAYWRIGHT ULTRA-OPTIMIZED SCRAPER (NO G2A)")
+#         print(f"📊 Total products: {len(products)}")
+#         print(f"⚙️ Concurrent browsers: {self.concurrent_browsers}")
+#         print(f"📦 Batch size: {self.batch_size}")
+#         print(f"🚫 G2A handling: Removed")
+#         print()
+
+#         # Load progress
+#         await self.load_progress()
+
+#         # Filter remaining products
+#         remaining_products = [p for p in products if p["product"] not in self.completed_products]
+#         print(f"📋 Remaining products: {len(remaining_products)}")
+
+#         if not remaining_products:
+#             print("✅ All products completed!")
+#             return self.results
+
+#         async with async_playwright() as playwright:
+#             # Launch browser with optimized settings for long-running tasks
+#             print("🔧 Launching optimized browser for long-running session...")
+#             browser = await playwright.chromium.launch(
+#                 headless=True,
+#                 args=[
+#                     '--no-sandbox',
+#                     '--disable-setuid-sandbox',
+#                     '--disable-dev-shm-usage',
+#                     '--disable-background-timer-throttling',
+#                     '--disable-backgrounding-occluded-windows',
+#                     '--disable-renderer-backgrounding',
+#                     '--disable-features=TranslateUI',
+#                     '--disable-blink-features=AutomationControlled',
+#                     '--memory-pressure-off'
+#                 ]
+#             )
+
+#             # Create browser contexts with different user agents
+#             contexts = []
+#             for i in range(self.concurrent_browsers):
+#                 user_agent = random.choice(self.user_agents)
+#                 context = await self.setup_browser_context(browser, user_agent)
+#                 contexts.append(context)
+#                 print(f"  ✅ Context {i+1}: {user_agent[:50]}...")
+
+#             try:
+#                 # Process in batches with context recycling
+#                 total_batches = (len(remaining_products) + self.batch_size - 1) // self.batch_size
+#                 context_recycle_interval = 10  # Recycle contexts every 10 batches
+
+#                 for batch_idx in range(0, len(remaining_products), self.batch_size):
+#                     batch = remaining_products[batch_idx:batch_idx + self.batch_size]
+#                     current_batch = (batch_idx // self.batch_size) + 1
+
+#                     print(f"\n{'='*60}")
+#                     print(f"📦 BATCH {current_batch}/{total_batches} ({len(batch)} products)")
+#                     print(f"{'='*60}")
+
+#                     # Create tasks for parallel product scraping
+#                     tasks = [self.scrape_product(contexts, product) for product in batch]
+
+#                     # Execute batch with progress tracking
+#                     batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+#                     # Process results
+#                     successful = sum(1 for r in batch_results if not isinstance(r, Exception))
+#                     print(f"\n📊 Batch {current_batch} completed: {successful}/{len(batch)} successful")
+
+#                     # Save progress every batch
+#                     await self.save_progress()
+
+#                     # Recycle contexts periodically to prevent memory leaks
+#                     if current_batch % context_recycle_interval == 0 and current_batch < total_batches:
+#                         print(f"🔄 Recycling contexts (batch {current_batch})...")
+#                         await self.context_recycling_cleanup(contexts, browser)
+
+#                     # Rest between batches
+#                     if current_batch < total_batches:
+#                         rest_time = random.uniform(5, 10)
+#                         print(f"😴 Resting {rest_time:.1f}s before next batch...")
+#                         await asyncio.sleep(rest_time)
+
+#                 # Final save
+#                 await self.save_progress()
+
+#                 print(f"\n🎉 SCRAPING COMPLETE!")
+#                 print(f"✅ Products scraped: {len(self.results['products'])}")
+#                 print(f"💾 Results saved to: {self.output_file}")
+
+#             except KeyboardInterrupt:
+#                 print("\n⚠️ Scraping interrupted")
+#                 await self.save_progress()
+
+#             finally:
+#                 # Clean up contexts and browser
+#                 for context in contexts:
+#                     await context.close()
+#                 await browser.close()
+#                 print("🔧 Browser cleanup completed")
+
+#         return self.results
+
+# # Usage
+# async def main():
+#     """Main function to run the scraper"""
+#     # Sample products data structure (expand to 4000)
+#     products = [
+#         {
+#             "product": "The Witcher 3 Complete Edition",
+#             "links": [
+#                 {"url": "https://www.gamivo.com/product/the-witcher-3-wild-hunt-pc-gog-global-en-de-fr-it-pl-cs-ja-ko-pt-ru-zh-es-tr-zh-hu-ar-complete", "site": "gamivo"},
+#                 {"url": "https://www.eneba.com/gog-the-witcher-3-wild-hunt-complete-edition-pc-gog-key-global", "site": "eneba"},
+#                 {"url": "https://driffle.com/the-witcher-3-wild-hunt-complete-edition-global-pc-gog-digital-key-p9930671", "site": "driffle"}
+#                 # Note: G2A links removed completely
+#             ]
+#         },
+#         {
+#             "product": "The Elder Scrolls V: Skyrim Special Edition",
+#             "links": [
+#                 {"url": "https://www.gamivo.com/product/the-elder-scrolls-v-skyrim-special-edition", "site": "gamivo"},
+#                 {"url": "https://www.eneba.com/steam-the-elder-scrolls-v-skyrim-special-edition-steam-key-global", "site": "eneba"},
+#                 {"url": "https://driffle.com/the-elder-scrolls-v-skyrim-steam-cd-key-p746048", "site": "driffle"}
+#                 # Note: G2A links removed completely
+#             ]
+#         }
+#         # Add your remaining 3998 products here
+#     ]
+
+#     # Initialize scraper with optimized settings for 4000 products
+#     scraper = PlaywrightProductScraper(
+#         batch_size=20,           # Smaller batches for better stability
+#         concurrent_browsers=3    # 3 parallel contexts for optimal performance
+#     )
+
+#     # Run scraper
+#     results = await scraper.scrape_multiple_products(products)
+
+#     # Calculate comprehensive statistics
+#     total_offers = sum(
+#         len(site["offer"]) 
+#         for product in results["products"] 
+#         for site in product["productDetail"]
+#     )
+
+#     # Calculate site-specific statistics (G2A removed)
+#     site_stats = {"gamivo": 0, "eneba": 0, "driffle": 0}
+#     site_success = {"gamivo": 0, "eneba": 0, "driffle": 0}
+#     total_attempts = {"gamivo": 0, "eneba": 0, "driffle": 0}
+
+#     for product in results["products"]:
+#         for site in product["productDetail"]:
+#             site_name = site["site"]
+#             if site_name in site_stats:
+#                 offers_count = len(site["offer"])
+#                 site_stats[site_name] += offers_count
+#                 total_attempts[site_name] += 1
+#                 if offers_count > 0:
+#                     site_success[site_name] += 1
+
+#     print(f"\n🏁 FINAL SUMMARY:")
+#     print(f"✅ Products scraped: {len(results['products'])}")
+#     print(f"💰 Total offers found: {total_offers}")
+#     print(f"📁 Results: {scraper.output_file}")
+
+#     print(f"\n📈 SITE PERFORMANCE:")
+#     for site, count in site_stats.items():
+#         success_rate = (site_success[site] / total_attempts[site] * 100) if total_attempts[site] > 0 else 0
+#         print(f"   {site.upper()}: {count} offers, {success_rate:.1f}% success rate ({site_success[site]}/{total_attempts[site]})")
+
+#     print(f"\n🎯 EXPECTED 4000 PRODUCT PERFORMANCE:")
+#     print(f"   ⏱️ Estimated time: 3-4 hours (faster without G2A)")
+#     print(f"   💰 Expected offers: 90,000-120,000 (3 sites only)")
+#     print(f"   🎯 Overall success rate: 85-95% (improved without G2A)")
+#     print(f"   🚀 Performance: 30% faster without G2A bottlenecks")
+
+# if __name__ == "__main__":
+#     # Run the async scraper
+#     asyncio.run(main())
+
+
+# 4000
+
 import asyncio
 import json
 import random
@@ -1314,567 +1894,501 @@ import aiohttp
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
+
 class PlaywrightProductScraper:
-    def __init__(self, batch_size: int = 30, concurrent_browsers: int = 3):
-        self.batch_size = batch_size
-        self.concurrent_browsers = concurrent_browsers
+    def __init__(self):
         self.progress_file = "playwright_progress.json"
         self.output_file = "playwright_results.json"
         self.cache_file = "price_cache.json"
 
-        # Progress tracking
-        self.completed_products = set()
+        # Progress tracking per site
+        self.completed_iterations = {"driffle": set(), "eneba": set(), "gamivo": set()}
         self.results = {"products": [], "timestamp": datetime.now().isoformat()}
         self.cache = {}
-
-        # User agents for rotation
-        self.user_agents = [
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"
-        ]
-
-        # Site configurations (G2A removed)
+        
+        # Site-specific configurations (optimized for speed)
         self.site_configs = {
+            "driffle": {
+                "batch_size": 10,          # Large batches - DRIFFLE is fast
+                "delay": 1.5,              # Short delay - DRIFFLE is reliable  
+                "timeout": 8000,           # Short timeout
+                "max_retries": 1,          # Single retry
+                "selectors": {
+                    "primary": '[class*="sc-"][class*="offer"], [data-testid*="offer"], .offer-card',
+                    "container": 'div#product-other-offers, [class*="offers-container"]',
+                    "price": '[class*="price"], [data-testid*="price"], .price-text, span:contains("$"), span:contains("₹")',
+                    "fallback": 'div:has([class*="price"]), .offer-item'
+                },
+                "wait_for": 'div#product-other-offers, [class*="offer"], [class*="price"]',
+                "currency": "₹",
+                "price_range": (100.0, 10000.0),
+                "url": "https://driffle.com/the-witcher-3-wild-hunt-complete-edition-global-pc-gog-digital-key-p9930671"
+            },
+            "eneba": {
+                "batch_size": 8,           # Medium batches - ENEBA is reliable
+                "delay": 2.0,              # Short delay
+                "timeout": 10000,          # Medium timeout  
+                "max_retries": 2,          # Two retries
+                "selectors": {
+                    "primary": 'ul._7z2Gr li.ej1a7C',
+                    "container": 'ul._7z2Gr, [class*="offer"]',
+                    "price": '.L5ErLT, [class*="price"], [data-testid*="price"]',
+                    "fallback": 'li:has(.L5ErLT), [class*="offer-item"]'
+                },
+                "wait_for": 'ul._7z2Gr, .L5ErLT, [class*="offer"]',
+                "currency": "₹",
+                "price_range": (100.0, 10000.0),
+                "url": "https://www.eneba.com/gog-the-witcher-3-wild-hunt-complete-edition-pc-gog-key-global"
+            },
             "gamivo": {
+                "batch_size": 3,           # Small batches - GAMIVO is tricky
+                "delay": 8.0,              # Long delay for anti-detection
+                "timeout": 15000,          # Long timeout
+                "max_retries": 3,          # Multiple retries
                 "selectors": {
                     "primary": 'li[data-testid="app-product-offer-item"]',
-                    "price": '.price__value, [class*="price"]',
-                    "fallback": 'li:has([class*="price"])'
+                    "price": '.price__value, [class*="price"], .text-price',
+                    "fallback": '[data-testid*="offer"]'
                 },
                 "wait_for": 'li[data-testid="app-product-offer-item"], .price__value',
                 "currency": "$",
-                "price_range": (0.5, 500.0)
-            },
-            "eneba": {
-                "selectors": {
-                    "primary": 'ul._7z2Gr li.ej1a7C',
-                    "container": 'ul._7z2Gr',
-                    "price": '.L5ErLT, [class*="price"]',
-                    "fallback": 'li:has(.L5ErLT)'
-                },
-                "wait_for": 'ul._7z2Gr, .L5ErLT',
-                "currency": "₹",
-                "price_range": (100.0, 10000.0)
-            },
-            "driffle": {
-                "selectors": {
-                    "primary": 'div#product-other-offers div[class*="sc-"]',
-                    "container": 'div#product-other-offers',
-                    "price": '[class*="sc-2fc8b9b4-25"], [class*="price"]',
-                    "fallback": 'div:has([class*="price"])'
-                },
-                "wait_for": 'div#product-other-offers, [class*="sc-"]',
-                "currency": "₹", 
-                "price_range": (100.0, 10000.0)
+                "price_range": (0.5, 500.0),
+                "url": "https://www.gamivo.com/product/the-witcher-3-wild-hunt-pc-gog-global-en-de-fr-it-pl-cs-ja-ko-pt-ru-zh-es-tr-zh-hu-ar-complete"
             }
         }
 
-    async def setup_browser_context(self, browser: Browser, user_agent: str) -> BrowserContext:
-        """Create optimized browser context with stealth features"""
-        context = await browser.new_context(
-            user_agent=user_agent,
-            viewport={'width': 1920, 'height': 1080},
-            java_script_enabled=True,
-            ignore_https_errors=True,
-            extra_http_headers={
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'DNT': '1',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-            }
-        )
+        # Site-specific user agents
+        self.user_agents = {
+            "driffle": [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            ],
+            "eneba": [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            ],
+            "gamivo": [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1.2 Safari/605.1.15",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 OPR/115.0.0.0"
+            ]
+        }
 
-        # Add stealth modifications
-        await context.add_init_script("""
-            // Remove webdriver property
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined,
-            });
-
-            // Mock plugins
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5],
-            });
-
-            // Mock languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['en-US', 'en'],
-            });
-
-            // Override permissions
-            const originalQuery = window.navigator.permissions.query;
-            return window.navigator.permissions.query = (parameters) => (
-                parameters.name === 'notifications' ?
-                    Promise.resolve({ state: Notification.permission }) :
-                    originalQuery(parameters)
-            );
-        """)
-
-        return context
+        # Statistics tracking
+        self.site_stats = {site: {"success": 0, "attempts": 0, "start_time": None} for site in self.site_configs.keys()}
 
     async def load_progress(self):
-        """Load previous progress and cache"""
+        """Load previous progress for all sites"""
         try:
             if Path(self.progress_file).exists():
                 with open(self.progress_file, "r") as f:
                     data = json.load(f)
-                    self.completed_products = set(data.get("completed", []))
+                    
+                    site_progress = data.get("site_progress", {})
+                    for site in ["driffle", "eneba", "gamivo"]:
+                        self.completed_iterations[site] = set(site_progress.get(site, []))
+                    
                     self.results = data.get("results", {"products": []})
-                    print(f"📂 Resumed: {len(self.completed_products)} products completed")
-
-            if Path(self.cache_file).exists():
-                with open(self.cache_file, "r") as f:
-                    self.cache = json.load(f)
-                    print(f"💾 Loaded cache: {len(self.cache)} entries")
+                    
+                    # Load statistics
+                    saved_stats = data.get("site_stats", {})
+                    for site in self.site_configs.keys():
+                        if site in saved_stats:
+                            self.site_stats[site].update(saved_stats[site])
+                    
+                    print(f"📂 Resumed progress:")
+                    for site in ["driffle", "eneba", "gamivo"]:
+                        completed = len(self.completed_iterations[site])
+                        print(f"   {site.upper()}: {completed}/1000 iterations")
 
         except Exception as e:
             print(f"❌ Error loading progress: {e}")
 
     async def save_progress(self):
-        """Save current progress and cache"""
+        """Save progress for all sites"""
         progress_data = {
-            "completed": list(self.completed_products),
+            "site_progress": {
+                site: list(iterations) for site, iterations in self.completed_iterations.items()
+            },
             "results": self.results,
-            "timestamp": datetime.now().isoformat(),
-            "total_completed": len(self.completed_products)
+            "site_stats": self.site_stats,
+            "timestamp": datetime.now().isoformat()
         }
 
         try:
             with open(self.progress_file, "w") as f:
                 json.dump(progress_data, f, indent=2)
-
             with open(self.output_file, "w") as f:
                 json.dump(self.results, f, indent=2)
-
-            with open(self.cache_file, "w") as f:
-                json.dump(self.cache, f, indent=2)
-
         except Exception as e:
             print(f"❌ Error saving progress: {e}")
 
-    def get_site_name(self, url: str) -> str:
-        """Extract site name from URL"""
-        domain = url.split('/')[2].lower()
-        for site in self.site_configs.keys():
-            if site in domain:
-                return site
-        return "unknown"
+    async def setup_browser_context(self, browser: Browser, site_name: str) -> BrowserContext:
+        """Site-specific optimized browser context"""
+        user_agent = random.choice(self.user_agents[site_name])
+        
+        # Basic headers for fast sites, enhanced for GAMIVO
+        headers = {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+        }
+        
+        if site_name == "gamivo":
+            headers.update({
+                'Sec-Ch-Ua': '"Chromium";v="130", "Google Chrome";v="130", "Not?A_Brand";v="99"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1'
+            })
 
-    async def intelligent_wait(self, page: Page, site_name: str, max_retries: int = 3):
-        """Smart waiting strategy based on site behavior"""
-        config = self.site_configs.get(site_name, {})
-        wait_selector = config.get("wait_for", "body")
+        context = await browser.new_context(
+            user_agent=user_agent,
+            viewport={'width': 1920, 'height': 1080} if site_name == "gamivo" else {'width': 1366, 'height': 768},
+            java_script_enabled=True,
+            ignore_https_errors=True,
+            extra_http_headers=headers
+        )
 
-        for attempt in range(max_retries):
-            try:
-                # Wait for initial content
-                await page.wait_for_selector(wait_selector, timeout=15000)
+        # Enhanced stealth for GAMIVO only
+        if site_name == "gamivo":
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+                Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+                Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+                window.chrome = { runtime: {}, loadTimes: function() { return {}; } };
+            """)
 
-                # Site-specific waiting strategies
-                if site_name == "gamivo":
-                    # Scroll to trigger lazy loading
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight/2)")
-                    await asyncio.sleep(2)
-                    await page.evaluate("window.scrollTo(0, 0)")
-                    await asyncio.sleep(1)
-                    # Extra wait for dynamic content
-                    await asyncio.sleep(3)
-
-                elif site_name == "driffle":
-                    # Wait for offers section specifically
-                    await page.wait_for_selector('div#product-other-offers', timeout=10000)
-                    await asyncio.sleep(2)
-
-                else:
-                    await asyncio.sleep(1)
-
-                return True
-
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    print(f"    ⏳ Wait retry {attempt + 1}/{max_retries}")
-                    await asyncio.sleep(2)
-                    continue
-                else:
-                    print(f"    ⚠️ Wait timeout for {site_name}")
-                    return False
+        return context
 
     def extract_prices_from_text(self, text: str, currency: str, price_range: tuple) -> List[float]:
-        """Extract valid prices from text"""
+        """Fast price extraction"""
         prices = []
-
-        # Currency-specific patterns
+        
         if currency == "₹":
-            patterns = [r'₹\s*(\d+(?:,\d+)*(?:\.\d+)?)', r'Rs\.?\s*(\d+(?:,\d+)*(?:\.\d+)?)']
+            patterns = [r'₹\s*(\d+(?:,\d+)*(?:\.\d{1,2})?)', r'(\d+(?:,\d+)*(?:\.\d{1,2})?)\s*₹']
         else:
-            patterns = [r'[\$€£]\s*(\d+(?:\.\d+)?)', r'(\d+\.\d+)']
+            patterns = [r'[\$€£]\s*(\d+(?:\.\d{1,2})?)', r'(\d+\.\d{1,2})']
 
         for pattern in patterns:
-            matches = re.findall(pattern, text)
+            matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 try:
-                    clean_price = match.replace(',', '')
-                    price_value = float(clean_price)
-                    if price_range[0] <= price_value <= price_range[1]:
-                        prices.append(price_value)
-                except ValueError:
+                    clean_price = match.replace(',', '').strip()
+                    if clean_price:
+                        price_value = float(clean_price)
+                        if price_range[0] <= price_value <= price_range[1]:
+                            prices.append(price_value)
+                except (ValueError, TypeError):
                     continue
 
-        return list(set(prices))  # Remove duplicates
+        return sorted(list(set(prices)))
 
     async def scrape_site_offers(self, page: Page, site_name: str, current_time: str) -> List[Dict]:
-        """Enhanced site-specific offer extraction"""
+        """Optimized offer extraction per site"""
         offers = []
-        config = self.site_configs.get(site_name, {})
+        config = self.site_configs[site_name]
 
         try:
+            # Minimal wait for fast sites, longer for GAMIVO
+            await asyncio.sleep(0.5 if site_name != "gamivo" else 2)
+            
             content = await page.content()
             soup = BeautifulSoup(content, 'html.parser')
 
-            # Get site configuration
-            selectors = config.get("selectors", {})
-            currency = config.get("currency", "$")
-            price_range = config.get("price_range", (1.0, 500.0))
+            selectors = config["selectors"]
+            currency = config["currency"]
+            price_range = config["price_range"]
 
-            print(f"    🔍 Extracting {site_name.upper()} offers...")
+            print(f"    🔍 {site_name.upper()}: Extracting offers...")
 
-            # Try primary selector
-            offer_elements = soup.select(selectors.get("primary", ""))
-
-            # Try fallback selectors if primary fails
+            # Fast extraction - try primary selector first
+            offer_elements = soup.select(selectors["primary"])
+            
             if not offer_elements and "container" in selectors:
-                container = soup.select_one(selectors["container"])
-                if container:
-                    offer_elements = container.find_all("li") or container.find_all("div")
+                containers = soup.select(selectors["container"])
+                for container in containers[:2]:
+                    children = container.find_all(["li", "div", "span"])[:15]
+                    if children:
+                        offer_elements = children
+                        break
 
-            if not offer_elements and "fallback" in selectors:
-                offer_elements = soup.select(selectors["fallback"])
+            print(f"    📊 {site_name.upper()}: Found {len(offer_elements)} elements")
 
-            print(f"    📊 Found {len(offer_elements)} potential offers")
-
-            # Extract prices from offers
-            for i, element in enumerate(offer_elements[:15]):
+            for i, element in enumerate(offer_elements[:20]):
                 try:
-                    element_text = element.get_text()
+                    element_text = element.get_text(strip=True) if hasattr(element, 'get_text') else str(element)
+                    if len(element_text) < 2:
+                        continue
 
-                    # Look for price elements first
-                    price_elements = element.select(selectors.get("price", ""))
-                    element_prices = []
-
-                    if price_elements:
-                        for price_elem in price_elements:
-                            prices = self.extract_prices_from_text(
-                                price_elem.get_text(), currency, price_range
-                            )
-                            element_prices.extend(prices)
-
-                    # If no price elements, extract from full text
-                    if not element_prices:
-                        element_prices = self.extract_prices_from_text(
-                            element_text, currency, price_range
-                        )
-
-                    # Create offer data
-                    if element_prices:
-                        unique_prices = sorted(list(set(element_prices)))
-                        offer_data = {}
-
-                        if len(unique_prices) >= 2:
-                            offer_data[f"lowestPrice_{current_time}"] = unique_prices[0]
-                            offer_data[f"promotedPrice_{current_time}"] = unique_prices[1]
-                        elif len(unique_prices) == 1:
-                            offer_data[f"lowestPrice_{current_time}"] = unique_prices[0]
-
-                        if offer_data:
-                            offers.append(offer_data)
-                            print(f"      💰 Offer {i+1}: {currency}{unique_prices[0]}")
+                    prices = self.extract_prices_from_text(element_text, currency, price_range)
+                    
+                    if prices:
+                        offer_data = {f"lowestPrice_{current_time}": prices[0]}
+                        if len(prices) > 1:
+                            offer_data[f"promotedPrice_{current_time}"] = prices[1]
+                        
+                        offers.append(offer_data)
+                        print(f"      💰 {site_name.upper()} Offer {i+1}: {currency}{prices[0]}")
 
                 except Exception as e:
-                    print(f"      ❌ Error processing offer {i+1}: {e}")
                     continue
 
         except Exception as e:
-            print(f"    ❌ Error scraping {site_name}: {e}")
+            print(f"    ❌ {site_name.upper()}: Error - {e}")
 
-        print(f"    ✅ {site_name.upper()}: {len(offers)} valid offers extracted")
+        print(f"    ✅ {site_name.upper()}: {len(offers)} offers extracted")
         return offers
 
-    async def scrape_product_on_site(self, context: BrowserContext, product: Dict, site_link: Dict, current_time: str) -> Dict:
-        """Scrape single product on single site (G2A handling removed)"""
-        site_name = self.get_site_name(site_link["url"])
+    async def scrape_single_site_optimized(self, site_name: str, iterations_target: int = 1000):
+        """Optimized scraping for a single site with site-specific settings"""
+        config = self.site_configs[site_name]
+        
+        remaining_iterations = [
+            i for i in range(1, iterations_target + 1)
+            if i not in self.completed_iterations[site_name]
+        ]
+        
+        if not remaining_iterations:
+            print(f"✅ {site_name.upper()}: All iterations completed!")
+            return
 
-        site_data = {
-            "url": site_link["url"],
-            "site": site_name,
-            "offer": []
-        }
+        print(f"🚀 {site_name.upper()}: Starting {len(remaining_iterations)} iterations")
+        print(f"⚙️ {site_name.upper()}: Batch size {config['batch_size']}, Delay {config['delay']}s")
+        
+        self.site_stats[site_name]["start_time"] = time.time()
 
-        page = None
-        try:
-            page = await context.new_page()
-
-            # Block resources for faster loading
-            await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2}", 
-                           lambda route: route.abort())
-
-            print(f"    🌐 {site_name.upper()}: Loading page...")
-
-            # Navigate with timeout
-            await page.goto(site_link["url"], timeout=30000, wait_until="domcontentloaded")
-
-            # Intelligent waiting
-            await self.intelligent_wait(page, site_name)
-
-            # Extract offers
-            offers = await self.scrape_site_offers(page, site_name, current_time)
-            site_data["offer"] = offers
-
-            # Add delay to avoid rate limiting
-            await asyncio.sleep(random.uniform(1, 3))
-
-        except Exception as e:
-            print(f"    ❌ Error scraping {site_name}: {e}")
-            site_data["offer"] = []
-
-        finally:
-            if page:
-                await page.close()
-
-        return site_data
-
-    async def scrape_product(self, contexts: List[BrowserContext], product: Dict) -> Optional[Dict]:
-        """Scrape single product across all sites"""
-        if product["product"] in self.completed_products:
-            return None
-
-        print(f"\n🎮 Scraping: {product['product']}")
-        current_time = datetime.now().strftime('%Y-%m-%dT%H:%M')
-
-        product_result = {
-            "product": product["product"],
-            "productDetail": []
-        }
-
-        # Filter out any G2A links if they exist
-        valid_links = [link for link in product["links"] if self.get_site_name(link["url"]) != "g2a"]
-
-        # Create tasks for parallel site scraping
-        tasks = []
-        for i, site_link in enumerate(valid_links):
-            context = contexts[i % len(contexts)]
-            task = self.scrape_product_on_site(context, product, site_link, current_time)
-            tasks.append(task)
-
-        # Execute all sites in parallel
-        site_results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Process results
-        for result in site_results:
-            if isinstance(result, Exception):
-                print(f"    ❌ Task failed: {result}")
-            else:
-                product_result["productDetail"].append(result)
-
-        # Update tracking
-        self.results["products"].append(product_result)
-        self.completed_products.add(product["product"])
-
-        total_offers = sum(len(site["offer"]) for site in product_result["productDetail"])
-        print(f"  🎯 Total offers: {total_offers}")
-
-        return product_result
-
-    async def context_recycling_cleanup(self, contexts: List[BrowserContext], browser: Browser):
-        """Recycle browser contexts periodically to prevent memory leaks"""
-        try:
-            for i, context in enumerate(contexts):
-                await context.close()
-                user_agent = random.choice(self.user_agents)
-                contexts[i] = await self.setup_browser_context(browser, user_agent)
-            print("🔄 Browser contexts recycled successfully")
-        except Exception as e:
-            print(f"❌ Error recycling contexts: {e}")
-
-    async def scrape_multiple_products(self, products: List[Dict]) -> Dict:
-        """Main scraping function with parallel processing and context recycling"""
-        print(f"🚀 PLAYWRIGHT ULTRA-OPTIMIZED SCRAPER (NO G2A)")
-        print(f"📊 Total products: {len(products)}")
-        print(f"⚙️ Concurrent browsers: {self.concurrent_browsers}")
-        print(f"📦 Batch size: {self.batch_size}")
-        print(f"🚫 G2A handling: Removed")
-        print()
-
-        # Load progress
-        await self.load_progress()
-
-        # Filter remaining products
-        remaining_products = [p for p in products if p["product"] not in self.completed_products]
-        print(f"📋 Remaining products: {len(remaining_products)}")
-
-        if not remaining_products:
-            print("✅ All products completed!")
-            return self.results
+        # Fixed browser arguments (removed problematic user-data-dir)
+        browser_args = [
+            '--no-sandbox',
+            '--disable-setuid-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI',
+            '--memory-pressure-off',
+            '--max_old_space_size=4096'
+        ]
+        
+        # Additional args for GAMIVO anti-detection
+        if site_name == "gamivo":
+            browser_args.extend([
+                '--disable-blink-features=AutomationControlled',
+                '--disable-web-security',
+                '--disable-features=VizDisplayCompositor'
+            ])
 
         async with async_playwright() as playwright:
-            # Launch browser with optimized settings for long-running tasks
-            print("🔧 Launching optimized browser for long-running session...")
-            browser = await playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-background-timer-throttling',
-                    '--disable-backgrounding-occluded-windows',
-                    '--disable-renderer-backgrounding',
-                    '--disable-features=TranslateUI',
-                    '--disable-blink-features=AutomationControlled',
-                    '--memory-pressure-off'
-                ]
-            )
-
-            # Create browser contexts with different user agents
-            contexts = []
-            for i in range(self.concurrent_browsers):
-                user_agent = random.choice(self.user_agents)
-                context = await self.setup_browser_context(browser, user_agent)
-                contexts.append(context)
-                print(f"  ✅ Context {i+1}: {user_agent[:50]}...")
-
+            browser = await playwright.chromium.launch(headless=True, args=browser_args)
+            
             try:
-                # Process in batches with context recycling
-                total_batches = (len(remaining_products) + self.batch_size - 1) // self.batch_size
-                context_recycle_interval = 10  # Recycle contexts every 10 batches
+                batch_size = config["batch_size"]
+                total_batches = (len(remaining_iterations) + batch_size - 1) // batch_size
+                
+                for batch_idx in range(0, len(remaining_iterations), batch_size):
+                    batch_iterations = remaining_iterations[batch_idx:batch_idx + batch_size]
+                    current_batch = (batch_idx // batch_size) + 1
 
-                for batch_idx in range(0, len(remaining_products), self.batch_size):
-                    batch = remaining_products[batch_idx:batch_idx + self.batch_size]
-                    current_batch = (batch_idx // self.batch_size) + 1
+                    print(f"\n📦 {site_name.upper()} Batch {current_batch}/{total_batches} ({len(batch_iterations)} iterations)")
 
-                    print(f"\n{'='*60}")
-                    print(f"📦 BATCH {current_batch}/{total_batches} ({len(batch)} products)")
-                    print(f"{'='*60}")
+                    # Create fresh context for each batch
+                    context = await self.setup_browser_context(browser, site_name)
 
-                    # Create tasks for parallel product scraping
-                    tasks = [self.scrape_product(contexts, product) for product in batch]
+                    try:
+                        batch_start = time.time()
+                        successful = 0
 
-                    # Execute batch with progress tracking
-                    batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                        for iteration in batch_iterations:
+                            try:
+                                # Rate limiting
+                                await asyncio.sleep(config["delay"] + random.uniform(0, 1))
+                                
+                                page = await context.new_page()
+                                
+                                # Block resources for speed (except for GAMIVO which needs everything)
+                                if site_name != "gamivo":
+                                    await page.route("**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,ico,webp}", 
+                                                   lambda route: route.abort())
 
-                    # Process results
-                    successful = sum(1 for r in batch_results if not isinstance(r, Exception))
-                    print(f"\n📊 Batch {current_batch} completed: {successful}/{len(batch)} successful")
+                                print(f"🌐 {site_name.upper()} Iteration {iteration}: Loading...")
 
-                    # Save progress every batch
+                                await page.goto(config["url"], timeout=config["timeout"], wait_until="domcontentloaded")
+
+                                # Site-specific wait behavior
+                                selector_wait = config["wait_for"]
+                                max_retries = config["max_retries"]
+                                
+                                success = False
+                                for attempt in range(max_retries):
+                                    try:
+                                        await page.wait_for_selector(selector_wait, timeout=config["timeout"])
+                                        
+                                        # GAMIVO needs special handling
+                                        if site_name == "gamivo":
+                                            await asyncio.sleep(random.uniform(1, 3))
+                                            await page.evaluate("window.scrollTo(0, 300)")
+                                            await asyncio.sleep(1)
+                                        
+                                        success = True
+                                        break
+                                    except:
+                                        if attempt < max_retries - 1:
+                                            await asyncio.sleep(1)
+                                            continue
+                                        break
+
+                                if success:
+                                    current_time = datetime.now().strftime('%Y-%m-%dT%H:%M')
+                                    offers = await self.scrape_site_offers(page, site_name, current_time)
+                                    
+                                    # Save result
+                                    result = {
+                                        "product": "The Witcher 3 Complete Edition",
+                                        "site": site_name,
+                                        "iteration": iteration,
+                                        "timestamp": current_time,
+                                        "offers": offers,
+                                        "url": config["url"]
+                                    }
+                                    
+                                    self.results["products"].append(result)
+                                    self.completed_iterations[site_name].add(iteration)
+                                    
+                                    if offers:
+                                        successful += 1
+                                        self.site_stats[site_name]["success"] += 1
+                                    
+                                    self.site_stats[site_name]["attempts"] += 1
+                                    
+                                    print(f"✅ {site_name.upper()} {iteration}: {len(offers)} offers")
+                                else:
+                                    print(f"❌ {site_name.upper()} {iteration}: Failed to load")
+                                    self.site_stats[site_name]["attempts"] += 1
+
+                                await page.close()
+
+                            except Exception as e:
+                                print(f"❌ {site_name.upper()} {iteration}: {str(e)[:50]}...")
+                                self.site_stats[site_name]["attempts"] += 1
+
+                        batch_time = time.time() - batch_start
+                        rate = successful / batch_time if batch_time > 0 else 0
+                        
+                        print(f"📊 {site_name.upper()} Batch {current_batch}: {successful}/{len(batch_iterations)} successful, {rate:.2f}/sec")
+
+                    finally:
+                        await context.close()
+
+                    # Save progress after each batch
                     await self.save_progress()
 
-                    # Recycle contexts periodically to prevent memory leaks
-                    if current_batch % context_recycle_interval == 0 and current_batch < total_batches:
-                        print(f"🔄 Recycling contexts (batch {current_batch})...")
-                        await self.context_recycling_cleanup(contexts, browser)
-
-                    # Rest between batches
+                    # Rest between batches (shorter for fast sites)
                     if current_batch < total_batches:
-                        rest_time = random.uniform(5, 10)
-                        print(f"😴 Resting {rest_time:.1f}s before next batch...")
+                        rest_time = 5 if site_name == "gamivo" else 2
                         await asyncio.sleep(rest_time)
 
-                # Final save
-                await self.save_progress()
-
-                print(f"\n🎉 SCRAPING COMPLETE!")
-                print(f"✅ Products scraped: {len(self.results['products'])}")
-                print(f"💾 Results saved to: {self.output_file}")
-
-            except KeyboardInterrupt:
-                print("\n⚠️ Scraping interrupted")
-                await self.save_progress()
-
             finally:
-                # Clean up contexts and browser
-                for context in contexts:
-                    await context.close()
                 await browser.close()
-                print("🔧 Browser cleanup completed")
 
+        # Final statistics for this site
+        elapsed = time.time() - self.site_stats[site_name]["start_time"]
+        completed = len(self.completed_iterations[site_name])
+        success_rate = (self.site_stats[site_name]["success"] / max(1, self.site_stats[site_name]["attempts"])) * 100
+        
+        print(f"\n🎉 {site_name.upper()} COMPLETED!")
+        print(f"✅ Iterations: {completed}/{iterations_target}")
+        print(f"📊 Success rate: {success_rate:.1f}%")
+        print(f"⏱️ Time: {elapsed/60:.1f} minutes")
+        print(f"🏃 Average rate: {completed/elapsed:.2f} iterations/sec")
+
+    async def scrape_all_sites_parallel(self):
+        """Run all 3 sites simultaneously for maximum speed"""
+        print("🚀 PARALLEL MULTI-SITE SCRAPER")
+        print("🔥 Running DRIFFLE + ENEBA + GAMIVO simultaneously!")
+        print("📊 Target: 1000 iterations per site (3000 total)")
+        print()
+
+        await self.load_progress()
+
+        # Check what's remaining for each site
+        remaining_counts = {}
+        for site in ["driffle", "eneba", "gamivo"]:
+            remaining = 1000 - len(self.completed_iterations[site])
+            remaining_counts[site] = remaining
+            print(f"📋 {site.upper()}: {remaining} iterations remaining")
+
+        if sum(remaining_counts.values()) == 0:
+            print("✅ All sites completed!")
+            return self.results
+
+        print(f"\n🏃 Starting parallel scraping...")
+        overall_start = time.time()
+
+        # Create tasks for each site that has remaining iterations
+        tasks = []
+        for site, remaining in remaining_counts.items():
+            if remaining > 0:
+                task = asyncio.create_task(
+                    self.scrape_single_site_optimized(site, 1000),
+                    name=f"scrape_{site}"
+                )
+                tasks.append(task)
+
+        # Run all sites in parallel
+        try:
+            await asyncio.gather(*tasks)
+        except Exception as e:
+            print(f"❌ Error in parallel execution: {e}")
+
+        # Final statistics
+        overall_time = time.time() - overall_start
+        total_completed = sum(len(iterations) for iterations in self.completed_iterations.values())
+        total_successful = sum(stats["success"] for stats in self.site_stats.values())
+
+        print(f"\n🏁 PARALLEL SCRAPING COMPLETE!")
+        print(f"⏱️ Total time: {overall_time/3600:.1f} hours")
+        print(f"✅ Total iterations: {total_completed}/3000")
+        print(f"💰 Total successful extractions: {total_successful}")
+        print(f"🔥 Overall rate: {total_completed/overall_time:.2f} iterations/sec")
+
+        print(f"\n📈 FINAL SITE BREAKDOWN:")
+        for site in ["driffle", "eneba", "gamivo"]:
+            completed = len(self.completed_iterations[site])
+            stats = self.site_stats[site]
+            success_rate = (stats["success"] / max(1, stats["attempts"])) * 100
+            print(f"   {site.upper()}: {completed}/1000 iterations, {success_rate:.1f}% success rate")
+
+        await self.save_progress()
         return self.results
 
-# Usage
+
 async def main():
-    """Main function to run the scraper"""
-    # Sample products data structure (expand to 4000)
-    products = [
-        {
-            "product": "The Witcher 3 Complete Edition",
-            "links": [
-                {"url": "https://www.gamivo.com/product/the-witcher-3-wild-hunt-pc-gog-global-en-de-fr-it-pl-cs-ja-ko-pt-ru-zh-es-tr-zh-hu-ar-complete", "site": "gamivo"},
-                {"url": "https://www.eneba.com/gog-the-witcher-3-wild-hunt-complete-edition-pc-gog-key-global", "site": "eneba"},
-                {"url": "https://driffle.com/the-witcher-3-wild-hunt-complete-edition-global-pc-gog-digital-key-p9930671", "site": "driffle"}
-                # Note: G2A links removed completely
-            ]
-        },
-        {
-            "product": "The Elder Scrolls V: Skyrim Special Edition",
-            "links": [
-                {"url": "https://www.gamivo.com/product/the-elder-scrolls-v-skyrim-special-edition", "site": "gamivo"},
-                {"url": "https://www.eneba.com/steam-the-elder-scrolls-v-skyrim-special-edition-steam-key-global", "site": "eneba"},
-                {"url": "https://driffle.com/the-elder-scrolls-v-skyrim-steam-cd-key-p746048", "site": "driffle"}
-                # Note: G2A links removed completely
-            ]
-        }
-        # Add your remaining 3998 products here
-    ]
+    """Main function - runs all sites in parallel"""
+    scraper = PlaywrightProductScraper()
 
-    # Initialize scraper with optimized settings for 4000 products
-    scraper = PlaywrightProductScraper(
-        batch_size=20,           # Smaller batches for better stability
-        concurrent_browsers=3    # 3 parallel contexts for optimal performance
-    )
+    try:
+        results = await scraper.scrape_all_sites_parallel()
+        print("\n🎉 ALL SITES COMPLETED SUCCESSFULLY!")
+        
+    except KeyboardInterrupt:
+        print("\n⚠️ Scraping interrupted by user")
+        await scraper.save_progress()
+        
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        await scraper.save_progress()
 
-    # Run scraper
-    results = await scraper.scrape_multiple_products(products)
-
-    # Calculate comprehensive statistics
-    total_offers = sum(
-        len(site["offer"]) 
-        for product in results["products"] 
-        for site in product["productDetail"]
-    )
-
-    # Calculate site-specific statistics (G2A removed)
-    site_stats = {"gamivo": 0, "eneba": 0, "driffle": 0}
-    site_success = {"gamivo": 0, "eneba": 0, "driffle": 0}
-    total_attempts = {"gamivo": 0, "eneba": 0, "driffle": 0}
-
-    for product in results["products"]:
-        for site in product["productDetail"]:
-            site_name = site["site"]
-            if site_name in site_stats:
-                offers_count = len(site["offer"])
-                site_stats[site_name] += offers_count
-                total_attempts[site_name] += 1
-                if offers_count > 0:
-                    site_success[site_name] += 1
-
-    print(f"\n🏁 FINAL SUMMARY:")
-    print(f"✅ Products scraped: {len(results['products'])}")
-    print(f"💰 Total offers found: {total_offers}")
-    print(f"📁 Results: {scraper.output_file}")
-
-    print(f"\n📈 SITE PERFORMANCE:")
-    for site, count in site_stats.items():
-        success_rate = (site_success[site] / total_attempts[site] * 100) if total_attempts[site] > 0 else 0
-        print(f"   {site.upper()}: {count} offers, {success_rate:.1f}% success rate ({site_success[site]}/{total_attempts[site]})")
-
-    print(f"\n🎯 EXPECTED 4000 PRODUCT PERFORMANCE:")
-    print(f"   ⏱️ Estimated time: 3-4 hours (faster without G2A)")
-    print(f"   💰 Expected offers: 90,000-120,000 (3 sites only)")
-    print(f"   🎯 Overall success rate: 85-95% (improved without G2A)")
-    print(f"   🚀 Performance: 30% faster without G2A bottlenecks")
 
 if __name__ == "__main__":
-    # Run the async scraper
     asyncio.run(main())
